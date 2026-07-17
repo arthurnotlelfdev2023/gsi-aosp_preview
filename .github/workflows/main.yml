@@ -1,0 +1,50 @@
+name: Build AOSP GSI
+on:
+  workflow_dispatch: # Inicia manualmente
+
+env:
+  AOSP_BRANCH: android15-gsi        # Versão do Android
+  LUNCH_TARGET: gsi_arm64-userdebug # Alvo GSI oficial
+  CCACHE_SIZE: 50G
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360 # Limite GitHub = 6h
+
+    steps:
+      - name: Instalar dependências
+        run: |
+          sudo apt update && sudo apt install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig python3 repo
+
+      - name: Inicializar AOSP
+        run: |
+          mkdir -p ~/aosp
+          cd ~/aosp
+          repo init -u https://android.googlesource.com/platform/manifest -b android-latest-release --depth=1
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
+
+      - name: Configurar ambiente
+        run: |
+          cd ~/aosp
+          source build/envsetup.sh
+          lunch gsi_arm64-userdebug
+          export USE_CCACHE=1
+          export CCACHE_DIR=~/.ccache
+          ccache -M ${{ env.CCACHE_SIZE }}
+
+      - name: Compilar GSI
+        run: |
+          cd ~/aosp
+          make -j$(nproc) systemimage
+
+      - name: Compactar saída
+        run: |
+          cd ~/aosp/out/target/product/generic_arm64
+          tar -czvf AOSP-${{ env.AOSP_BRANCH }}-GSI.tar.gz system.img vbmeta.img
+
+      - name: Disponibilizar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: AOSP-GSI-${{ env.AOSP_BRANCH }}
+          path: ~/aosp/out/target/product/generic_arm64/*.tar.gz
